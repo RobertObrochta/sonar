@@ -4,9 +4,12 @@ import os
 import glob
 import logging
 import subprocess
+import time
+import undetected_chromedriver as uc
 from selenium.webdriver.support.wait import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
-from selenium.common.exceptions import ElementClickInterceptedException, ElementNotInteractableException
+from selenium.webdriver.common.keys import Keys
+from selenium.common.exceptions import ElementClickInterceptedException, ElementNotInteractableException, TimeoutException, UnexpectedAlertPresentException
 import datetime
 import yaml
 try:
@@ -19,33 +22,52 @@ curr_dir = os.path.realpath(os.path.join(os.getcwd(), os.path.dirname(__file__))
 driver_loc = os.path.join(curr_dir, 'geckodriver.exe')
 downloads_folder_path = "C:/Users/robobrochta/Downloads"
 config_file = "config.yaml"
-timeout_secs = 100
+timeout_secs = 5
 
-# spin up firefox @ url
-driver = webdriver.Firefox()
+# spin up chrome @ url
+options = webdriver.ChromeOptions() 
+driver = webdriver.Chrome(options=options)
 driver.get(downloader_url)
 
 def enterURLAndConvert(song_url):
-    if isDownloadComplete():
-        print("Entering url and clicking")
-        wait = WebDriverWait(webdriver, timeout_secs)
-        # enter in song url
-        url_box = driver.find_element(By.ID, "video-url")
-        url_box.send_keys(song_url)
+    try:
+        if isDownloadComplete():
+            wait = WebDriverWait(webdriver, timeout_secs)
+            # convert & wait for download    
+            convert_btn = findElementSafe(driver.find_element(By.ID, "convert-button-1"))
+            convert_again_btn = findElementSafe(driver.find_element(By.ID, "convert-again-btn"))
+            video_info = findElementSafe(driver.find_element(By.ID, "video-info"))
 
-        # convert & wait for download    
-        convert_btn = findElementSafe(driver.find_element(By.ID, "convert-button-1"))
-        try:
-            if convert_btn is None:
+            if video_info is not None and video_info.get_attribute("style") == "display: none;":
+                # enter in song url
+                print("Entering url and clicking")
+
+                url_box = driver.find_element(By.ID, "video-url")
+                url_box.clear()
+                url_box.send_keys(song_url)
                 wait.until(EC.element_to_be_clickable(convert_btn), timeout_secs)
-            convert_btn.click()
-        except:
-            wait.until(EC.element_to_be_clickable(convert_btn), timeout_secs)
-            convert_btn.click()
+                convert_btn.click()
+            else:
+                print("Convert again is found")
+                wait.until(EC.element_to_be_clickable(convert_again_btn), timeout_secs)
+                convert_again_btn.click()
 
-    else:
+                enterURLAndConvert(song_url)
+            
+            time.sleep(timeout_secs)
+        
+        else: 
+            enterURLAndConvert(song_url)
+
+    except TimeoutException:
+        print("timed out, reloading...")
+        driver.refresh()
         enterURLAndConvert(song_url)
-
+        
+    except:
+        print("Something fucked up, reloading...")
+        driver.refresh()
+        enterURLAndConvert(song_url)
 
 def findElementSafe(element):
     try:
@@ -103,26 +125,14 @@ def main():
         song_urls = loadConfig()
         url_index = 0
 
-        wait = WebDriverWait(webdriver, timeout_secs)
-
         while url_index < len(song_urls):
+            print(url_index)
             url = song_urls[url_index]
-            try:
-                print(f"Downloading url: {url}")
-                enterURLAndConvert(url)
-            except:
-                convert_again_btn = findElementSafe(driver.find_element(By.ID, "convert-again-btn"))
-                wait.until(EC.element_to_be_clickable(convert_again_btn), timeout_secs)
-
-                if convert_again_btn is not None and convert_again_btn.is_displayed():
-                    print(f"Convert again exists")
-                    # convert again btn and repeat
-                    convert_again_btn.click()
-                enterURLAndConvert(url)
+            enterURLAndConvert(url)
 
             url_index += 1
   
-        return
+        print("Downloading complete!")
 
 
 def isDownloadComplete():
@@ -132,8 +142,9 @@ def isDownloadComplete():
         all_files.sort(key=os.path.getmtime, reverse=True)
         while True:
             part_files = glob.glob(downloads_folder_path + "\\*.part")
+            crdownload_files = glob.glob(downloads_folder_path + "\\*.crdownload")
             print("Downloading in progress...")
-            if len(part_files) == 0:
+            if len(part_files) == 0 and len(crdownload_files) == 0:
                 print("Downloading complete!")
                 break
     
